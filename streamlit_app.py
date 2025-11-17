@@ -10,8 +10,7 @@ from glob import glob
 DATA_DIR = "./federal_tax_documents"
 PERSIST_FILE = "./federal_tax_tables.csv"
 
-st.cache_data.clear()
-st.cache_resource.clear()
+
 @st.cache_data
 def extract_tables_from_pdf(pdf_path: str) -> pd.DataFrame | None:
     """
@@ -95,7 +94,16 @@ if table is not None:
     st.write(list(table.columns))
 
 
-if st.button("Clear All Cache"):
+if st.button("Delete Persistent Data"):
+    # Clear all Streamlit cache
     st.cache_data.clear()
     st.cache_resource.clear()
-    st.success("All cache cleared!")
+
+    # Remove the CSV if it exists
+    if os.path.exists(PERSIST_FILE):
+        os.remove(PERSIST_FILE)
+        st.success("Persistent CSV deleted and cache cleared.")
+    else:
+        st.warning("No persistent CSV file found.")
+
+    st.experimental_rerun()
