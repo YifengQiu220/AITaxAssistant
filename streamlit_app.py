@@ -12,7 +12,7 @@ DOC_PATH = "./federal_tax_documents/federal_forms/f1040.docx"  # change to your 
 
 def extract_lines_from_docx(path: str):
     """Extract non-empty text lines from a .docx file."""
-    doc = docx.Document(path)
+    doc = Document(path)
     lines = []
     for para in doc.paragraphs:
         text = para.text.strip()
@@ -30,33 +30,41 @@ def lines_to_table(lines):
     for line in lines:
         if ":" in line:
             field, value = line.split(":", 1)
-            rows.append({
-                "field": field.strip(),
-                "value": value.strip()
-            })
+            rows.append(
+                {
+                    "field": field.strip(),
+                    "value": value.strip(),
+                }
+            )
         else:
-            rows.append({
-                "field": "",
-                "value": line.strip()
-            })
+            rows.append(
+                {
+                    "field": "",
+                    "value": line.strip(),
+                }
+            )
     return pd.DataFrame(rows)
 
 
-st.title("🧾 ICON... AI Tax Assistant – DOC Extractor")
+st.title("icon... ai tax assistant")
 
 if not os.path.exists(DOC_PATH):
     st.error(f"File not found: {DOC_PATH}")
 else:
-    # 1️⃣ Extract text lines
-    lines = extract_lines_from_docx(DOC_PATH)
+    try:
+        # 1️⃣ Extract text lines from the DOCX
+        lines = extract_lines_from_docx(DOC_PATH)
 
-    st.subheader("Raw Text (Line by Line)")
-    st.write(lines)  # or st.text("\n".join(lines))
+        st.subheader("Raw Text (Line by Line)")
+        st.write(lines)  # or: st.text("\\n".join(lines))
 
-    # 2️⃣ Convert to table
-    df = lines_to_table(lines)
+        # 2️⃣ Convert lines into a table
+        df = lines_to_table(lines)
 
-    st.subheader("Converted Table")
-    st.dataframe(df)
+        st.subheader("Converted Table")
+        st.dataframe(df)
 
-    st.write("Columns:", list(df.columns))
+        st.write("Columns in table:", list(df.columns))
+    except Exception as e:
+        st.error("Error while reading the DOCX file")
+        st.exception(e)
