@@ -46,7 +46,7 @@ def lines_to_table(lines):
     return pd.DataFrame(rows)
 
 
-st.title("icon... ai tax assistant")
+st.title("🧾 AI Tax Assistant")
 
 if not os.path.exists(DOC_PATH):
     st.error(f"File not found: {DOC_PATH}")
