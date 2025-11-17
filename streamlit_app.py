@@ -1,109 +1,62 @@
 import streamlit as st
 from openai import OpenAI
 
-
+import streamlit as st
 import pandas as pd
-import pdfplumber
 import os
-from glob import glob
-
-DATA_DIR = "./federal_tax_documents"
-PERSIST_FILE = "./federal_tax_tables.csv"
+import docx  # from python-docx
 
 
-@st.cache_data
-def extract_tables_from_pdf(pdf_path: str) -> pd.DataFrame | None:
+DOC_PATH = "./federal_tax_documents/federal_forms/f1040.docx"  # change to your file
+
+
+def extract_lines_from_docx(path: str):
+    """Extract non-empty text lines from a .docx file."""
+    doc = docx.Document(path)
+    lines = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            lines.append(text)
+    return lines
+
+
+def lines_to_table(lines):
     """
-    Extract all tables from a single PDF into one DataFrame.
-    Columns are named col_0, col_1, ... based on position.
+    Convert lines like 'Field: Value' into a 2-column table.
+    Lines without ':' go into 'value' only.
     """
     rows = []
-    basename = os.path.basename(pdf_path)
-
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
-            tables = page.extract_tables()
-            if not tables:
-                continue
-
-            for t_idx, table in enumerate(tables):
-                for row_idx, row in enumerate(table):
-                    if row is None:
-                        continue
-
-                    # Build a dict: source info + each column
-                    row_dict = {
-                        "source_file": basename,
-                        "page": page_num,
-                        "table_index": t_idx,
-                        "row_index": row_idx,
-                    }
-                    for col_idx, cell in enumerate(row):
-                        row_dict[f"col_{col_idx}"] = cell
-                    rows.append(row_dict)
-
-    if not rows:
-        return None
-
+    for line in lines:
+        if ":" in line:
+            field, value = line.split(":", 1)
+            rows.append({
+                "field": field.strip(),
+                "value": value.strip()
+            })
+        else:
+            rows.append({
+                "field": "",
+                "value": line.strip()
+            })
     return pd.DataFrame(rows)
 
 
-@st.cache_data
-def build_master_table(data_dir: str) -> pd.DataFrame | None:
-    """
-    Loop over all PDFs in the folder, extract tables, and combine them.
-    """
-    pdf_files = glob(os.path.join(data_dir, "*.pdf"))
-    all_tables = []
+st.title("🧾 ICON... AI Tax Assistant – DOC Extractor")
 
-    for pdf in pdf_files:
-        df = extract_tables_from_pdf(pdf)
-        if df is not None and not df.empty:
-            all_tables.append(df)
-
-    if not all_tables:
-        return None
-
-    master_df = pd.concat(all_tables, ignore_index=True)
-    return master_df
-
-
-st.title("🧾 AI Tax Assistant")
-
-table = None
-
-# 1️⃣ Try to load persisted CSV first
-if os.path.exists(PERSIST_FILE):
-    table = pd.read_csv(PERSIST_FILE)
-    st.success("Loaded table from persistent CSV file.")
+if not os.path.exists(DOC_PATH):
+    st.error(f"File not found: {DOC_PATH}")
 else:
-    # 2️⃣ Otherwise, build from PDFs and persist
-    table = build_master_table(DATA_DIR)
-    if table is not None:
-        table.to_csv(PERSIST_FILE, index=False)
-        st.success("Extracted tables from PDFs and saved to CSV (persistent).")
-    else:
-        st.warning("No tables found in PDFs under ./federal_tax_documents")
+    # 1️⃣ Extract text lines
+    lines = extract_lines_from_docx(DOC_PATH)
 
-# 3️⃣ Display the table
-if table is not None:
-    st.subheader("Combined Table from All PDFs")
-    st.dataframe(table)
+    st.subheader("Raw Text (Line by Line)")
+    st.write(lines)  # or st.text("\n".join(lines))
 
-    st.write("Columns in the table:")
-    st.write(list(table.columns))
+    # 2️⃣ Convert to table
+    df = lines_to_table(lines)
 
+    st.subheader("Converted Table")
+    st.dataframe(df)
 
-if st.button("Delete Persistent Data"):
-    # Clear all Streamlit cache
-    st.cache_data.clear()
-    st.cache_resource.clear()
-
-    # Remove the CSV if it exists
-    if os.path.exists(PERSIST_FILE):
-        os.remove(PERSIST_FILE)
-        st.success("Persistent CSV deleted and cache cleared.")
-    else:
-        st.warning("No persistent CSV file found.")
-
-    st.experimental_rerun()
+    st.write("Columns:", list(df.columns))
