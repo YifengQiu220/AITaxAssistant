@@ -1,12 +1,11 @@
 import streamlit as st
 from openai import OpenAI
-# app.py
-import os
-from glob import glob
 
 
 import pandas as pd
-import tabula  # for PDF -> tables
+import pdfplumber
+import os
+from glob import glob
 
 DATA_DIR = "./federal_tax_documents"
 PERSIST_FILE = "./federal_tax_tables.csv"
@@ -15,67 +14,81 @@ PERSIST_FILE = "./federal_tax_tables.csv"
 @st.cache_data
 def extract_tables_from_pdf(pdf_path: str) -> pd.DataFrame | None:
     """
-    Extract all tables from a single PDF and return as one DataFrame.
+    Extract all tables from a single PDF into one DataFrame.
+    Columns are named col_0, col_1, ... based on position.
     """
-    # multiple_tables=True returns a list of DataFrames (one per table found)
-    tables = tabula.read_pdf(
-        pdf_path,
-        pages="all",
-        multiple_tables=True
-    )
+    rows = []
+    basename = os.path.basename(pdf_path)
 
-    if not tables:
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            tables = page.extract_tables()
+            if not tables:
+                continue
+
+            for t_idx, table in enumerate(tables):
+                for row_idx, row in enumerate(table):
+                    if row is None:
+                        continue
+
+                    # Build a dict: source info + each column
+                    row_dict = {
+                        "source_file": basename,
+                        "page": page_num,
+                        "table_index": t_idx,
+                        "row_index": row_idx,
+                    }
+                    for col_idx, cell in enumerate(row):
+                        row_dict[f"col_{col_idx}"] = cell
+                    rows.append(row_dict)
+
+    if not rows:
         return None
 
-    df = pd.concat(tables, ignore_index=True)
-    df["source_file"] = os.path.basename(pdf_path)
-    return df
+    return pd.DataFrame(rows)
 
 
 @st.cache_data
 def build_master_table(data_dir: str) -> pd.DataFrame | None:
     """
-    Go through all PDFs in the folder, extract tables, and combine into one big table.
+    Loop over all PDFs in the folder, extract tables, and combine them.
     """
     pdf_files = glob(os.path.join(data_dir, "*.pdf"))
     all_tables = []
 
     for pdf in pdf_files:
         df = extract_tables_from_pdf(pdf)
-        if df is not None:
+        if df is not None and not df.empty:
             all_tables.append(df)
 
     if not all_tables:
         return None
 
-    master = pd.concat(all_tables, ignore_index=True)
-    return master
+    master_df = pd.concat(all_tables, ignore_index=True)
+    return master_df
 
 
-# app.py (continued)
-
-st.title("Federal Tax PDF → Persistent Table")
+st.title("PDF → Persistent Table (no tabula, no PyPDF2)")
 
 table = None
 
-# 1️⃣ If a persisted CSV already exists, load that first
+# 1️⃣ Try to load persisted CSV first
 if os.path.exists(PERSIST_FILE):
     table = pd.read_csv(PERSIST_FILE)
-    st.success("Loaded table from persistent CSV on disk.")
+    st.success("Loaded table from persistent CSV file.")
 else:
-    # 2️⃣ Otherwise, build from PDFs and then persist
+    # 2️⃣ Otherwise, build from PDFs and persist
     table = build_master_table(DATA_DIR)
-
     if table is not None:
         table.to_csv(PERSIST_FILE, index=False)
-        st.success("Extracted tables from PDFs and saved to persistent CSV.")
+        st.success("Extracted tables from PDFs and saved to CSV (persistent).")
     else:
-        st.warning("No tables found in PDFs in ./federal_tax_documents")
+        st.warning("No tables found in PDFs under ./federal_tax_documents")
 
-# 3️⃣ Show the table if we have it
+# 3️⃣ Display the table
 if table is not None:
     st.subheader("Combined Table from All PDFs")
     st.dataframe(table)
 
-    st.write("Columns detected:")
+    st.write("Columns in the table:")
     st.write(list(table.columns))
