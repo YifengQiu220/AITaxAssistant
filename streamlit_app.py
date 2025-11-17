@@ -10,7 +10,8 @@ from glob import glob
 DATA_DIR = "./federal_tax_documents"
 PERSIST_FILE = "./federal_tax_tables.csv"
 
-
+st.cache_data.clear()
+st.cache_resource.clear()
 @st.cache_data
 def extract_tables_from_pdf(pdf_path: str) -> pd.DataFrame | None:
     """
