@@ -280,40 +280,135 @@ else:
         st.error(f"File not found on disk: {file_path}")
 
 
+
+# Optional: install if you want PDF/DOCX text extraction
+# pip install pypdf2 python-docx
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    PdfReader = None
+
+try:
+    from docx import Document
+except ImportError:
+    Document = None
+
+st.set_page_config(page_title="AI Tax Assistant", page_icon="💬")
+
 st.title("💬 AI Assistant Chatbot")
 st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to help fill your tax forms. "
+    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to help fill your tax forms."
 )
 
+# ---------------------------------------------------------
+# 🔹 Upload Area: 2 Columns (Documents & Images)
+# ---------------------------------------------------------
+col1, col2 = st.columns(2)
 
+with col1:
+    st.subheader("📄 Upload a document")
+    doc_file = st.file_uploader(
+        "Upload a PDF / TXT / DOCX",
+        type=["pdf", "txt", "docx"],
+        key="doc_uploader",
+    )
+
+with col2:
+    st.subheader("🖼️ Upload an image")
+    img_file = st.file_uploader(
+        "Upload an image",
+        type=["png", "jpg", "jpeg"],
+        key="img_uploader",
+    )
+
+uploaded_text = None  # text extracted from uploaded document (if any)
+
+# ---------------------------------------------------------
+# 📄 Handle document upload + preview
+# ---------------------------------------------------------
+if doc_file is not None:
+    st.markdown(f"**Document uploaded:** `{doc_file.name}`")
+
+    if doc_file.type == "text/plain":
+        # Simple text file
+        uploaded_text = doc_file.read().decode("utf-8", errors="ignore")
+
+    elif doc_file.type == "application/pdf":
+        if PdfReader is None:
+            st.warning("PyPDF2 is not installed. Run `pip install pypdf2` to read PDFs.")
+        else:
+            reader = PdfReader(doc_file)
+            text_chunks = []
+            for page in reader.pages[:5]:  # limit pages to avoid huge output
+                text_chunks.append(page.extract_text() or "")
+            uploaded_text = "\n".join(text_chunks)
+
+    elif doc_file.type in [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ]:
+        if Document is None:
+            st.warning("python-docx is not installed. Run `pip install python-docx`.")
+        else:
+            doc = Document(doc_file)
+            paragraphs = [p.text for p in doc.paragraphs]
+            uploaded_text = "\n".join(paragraphs)
+
+    # Show the extracted / raw text (if any)
+    if uploaded_text:
+        with st.expander("📄 Preview extracted document text"):
+            st.text(uploaded_text)
+    else:
+        st.info("Document uploaded but no text could be extracted.")
+
+# ---------------------------------------------------------
+# 🖼️ Handle image upload + preview
+# ---------------------------------------------------------
+if img_file is not None:
+    st.markdown(f"**Image uploaded:** `{img_file.name}`")
+    st.image(img_file, caption="Uploaded image", use_container_width=True)
+
+# ---------------------------------------------------------
+# 🔑 OpenAI setup
+# ---------------------------------------------------------
 openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    st.info("Update your key.", icon="🗝️")
-else:
 
+if not openai_api_key:
+    st.info("Update your key in the environment variable OPENAI_API_KEY.", icon="🗝️")
+else:
     # Create an OpenAI client.
     client = OpenAI(api_key=openai_api_key)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
+    # Session state for chat messages
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display the existing chat messages via `st.chat_message`.
+    # Display previous messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("Do you want to file your taxes?"):
+    # Chat input
+    prompt = st.chat_input("Do you want to file your taxes?")
+    if prompt:
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Optionally inject uploaded document text into the context
+        if uploaded_text:
+            prompt_with_context = (
+                "The user has uploaded the following document text:\n\n"
+                f"{uploaded_text}\n\n"
+                f"User question: {prompt}"
+            )
+        else:
+            prompt_with_context = prompt
+
+        # Store and display user's message
+        st.session_state.messages.append(
+            {"role": "user", "content": prompt_with_context}
+        )
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # Generate a response using the OpenAI API.
+        # Generate response
         stream = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -323,8 +418,9 @@ else:
             stream=True,
         )
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
+        # Stream response and save it
         with st.chat_message("assistant"):
             response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": response}
+        )
