@@ -17,7 +17,7 @@ from glob import glob
 import pdfplumber
 
 
-DATA_DIR = "./federal_tax_documents/federal_forms/"
+DATA_DIR = "./federal_tax_documents/federal_forms"
 DB_PATH = "./documents.db"
 
 
