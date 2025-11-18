@@ -7,64 +7,274 @@ import os
 from docx import Document  # from python-docx
 
 
-DOC_PATH = "./federal_tax_documents/federal_forms/f1040.docx"  # change to your file
 
 
-def extract_lines_from_docx(path: str):
-    """Extract non-empty text lines from a .docx file."""
-    doc = Document(path)
-    lines = []
-    for para in doc.paragraphs:
+import sqlite3
+from glob import glob
+
+
+
+import pdfplumber
+
+
+DATA_DIR = "./federal_tax_documents/federal_forms/"
+DB_PATH = "./documents.db"
+
+
+# ---------- DB SETUP ----------
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT UNIQUE,
+            file_path TEXT,
+            file_type TEXT
+        );
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS extracted_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id INTEGER,
+            row_index INTEGER,
+            col_index INTEGER,
+            text TEXT,
+            FOREIGN KEY(doc_id) REFERENCES documents(id)
+        );
+        """
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def upsert_document(filename: str, file_path: str, file_type: str) -> int:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO documents (filename, file_path, file_type)
+        VALUES (?, ?, ?)
+        ON CONFLICT(filename) DO UPDATE SET file_path=excluded.file_path,
+                                            file_type=excluded.file_type;
+        """,
+        (filename, file_path, file_type),
+    )
+    conn.commit()
+
+    # get id
+    cur.execute("SELECT id FROM documents WHERE filename = ?", (filename,))
+    doc_id = cur.fetchone()[0]
+
+    conn.close()
+    return doc_id
+
+
+def clear_extracted_for_doc(doc_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM extracted_rows WHERE doc_id = ?", (doc_id,))
+    conn.commit()
+    conn.close()
+
+
+def insert_extracted_rows(doc_id: int, rows: list[dict]):
+    """
+    rows: list of dicts {row_index, col_index, text}
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.executemany(
+        """
+        INSERT INTO extracted_rows (doc_id, row_index, col_index, text)
+        VALUES (?, ?, ?, ?)
+        """,
+        [(doc_id, r["row_index"], r["col_index"], r["text"]) for r in rows],
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------- EXTRACTION HELPERS ----------
+
+def extract_pdf_tables(file_path: str) -> list[dict]:
+    """
+    Extract all tables from a PDF as list of {row_index, col_index, text}.
+    """
+    extracted = []
+    row_counter = 0
+
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            if not tables:
+                continue
+            for table in tables:
+                for row in table:
+                    if row is None:
+                        continue
+                    for col_idx, cell in enumerate(row):
+                        text = (cell or "").strip()
+                        extracted.append(
+                            {
+                                "row_index": row_counter,
+                                "col_index": col_idx,
+                                "text": text,
+                            }
+                        )
+                    row_counter += 1
+
+    return extracted
+
+
+def extract_docx_lines(file_path: str) -> list[dict]:
+    """
+    Extract paragraphs from a DOCX as a single 'column' table:
+    col_0 = text
+    """
+    extracted = []
+    doc = Document(file_path)
+
+    for idx, para in enumerate(doc.paragraphs):
         text = para.text.strip()
-        if text:
-            lines.append(text)
-    return lines
+        if not text:
+            continue
+        extracted.append(
+            {
+                "row_index": idx,
+                "col_index": 0,
+                "text": text,
+            }
+        )
+
+    return extracted
 
 
-def lines_to_table(lines):
+# ---------- PROCESS ALL DOCUMENTS ----------
+
+def process_all_documents():
     """
-    Convert lines like 'Field: Value' into a 2-column table.
-    Lines without ':' go into 'value' only.
+    Scan DATA_DIR for .pdf and .docx,
+    extract content, and store in SQLite.
     """
-    rows = []
-    for line in lines:
-        if ":" in line:
-            field, value = line.split(":", 1)
-            rows.append(
-                {
-                    "field": field.strip(),
-                    "value": value.strip(),
-                }
-            )
+    pdf_files = glob(os.path.join(DATA_DIR, "*.pdf"))
+    docx_files = glob(os.path.join(DATA_DIR, "*.docx"))
+
+    total_docs = 0
+    total_rows = 0
+
+    for file_path in pdf_files + docx_files:
+        filename = os.path.basename(file_path)
+        ext = os.path.splitext(filename)[1].lower()
+
+        if ext == ".pdf":
+            file_type = "pdf"
+            rows = extract_pdf_tables(file_path)
+        elif ext == ".docx":
+            file_type = "docx"
+            rows = extract_docx_lines(file_path)
         else:
-            rows.append(
-                {
-                    "field": "",
-                    "value": line.strip(),
-                }
-            )
-    return pd.DataFrame(rows)
+            continue  # skip unknown
+
+        doc_id = upsert_document(filename, file_path, file_type)
+        clear_extracted_for_doc(doc_id)
+
+        if rows:
+            insert_extracted_rows(doc_id, rows)
+            total_rows += len(rows)
+
+        total_docs += 1
+
+    return total_docs, total_rows
 
 
-st.title("🧾 AI Tax Assistant")
+def get_documents_df() -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT id, filename, file_type FROM documents", conn)
+    conn.close()
+    return df
 
-if not os.path.exists(DOC_PATH):
-    st.error(f"File not found: {DOC_PATH}")
+
+def get_extracted_for_doc(doc_id: int) -> pd.DataFrame:
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        """
+        SELECT row_index, col_index, text
+        FROM extracted_rows
+        WHERE doc_id = ?
+        ORDER BY row_index, col_index
+        """,
+        conn,
+        params=(doc_id,),
+    )
+    conn.close()
+    return df
+
+
+# ---------- STREAMLIT APP ----------
+
+st.title("Ai tax assistant")
+
+# init DB on startup
+init_db()
+
+st.sidebar.header("Actions")
+
+if st.sidebar.button("Process / Reindex All Documents"):
+    docs, rows = process_all_documents()
+    st.success(f"Processed {docs} document(s), extracted {rows} cell(s).")
+
+# List all documents from DB
+if os.path.exists(DB_PATH):
+    docs_df = get_documents_df()
 else:
-    try:
-        # 1️⃣ Extract text lines from the DOCX
-        lines = extract_lines_from_docx(DOC_PATH)
+    docs_df = pd.DataFrame(columns=["id", "filename", "file_type"])
 
-        st.subheader("Raw Text (Line by Line)")
-        st.write(lines)  # or: st.text("\\n".join(lines))
+st.subheader("Documents in persistent DB")
 
-        # 2️⃣ Convert lines into a table
-        df = lines_to_table(lines)
+if docs_df.empty:
+    st.info("No documents indexed yet. Click 'Process / Reindex All Documents' in the sidebar.")
+else:
+    st.dataframe(docs_df)
 
-        st.subheader("Converted Table")
-        st.dataframe(df)
+    # Select a document to view
+    doc_options = {f'{row["filename"]} ({row["file_type"]})': row["id"] for _, row in docs_df.iterrows()}
+    selected_label = st.selectbox("Select a document to view extracted data:", list(doc_options.keys()))
+    selected_doc_id = doc_options[selected_label]
 
-        st.write("Columns in table:", list(df.columns))
-    except Exception as e:
-        st.error("Error while reading the DOCX file")
-        st.exception(e)
+    # Show extracted rows for that document
+    extracted_df = get_extracted_for_doc(selected_doc_id)
+
+    st.subheader(f"Extracted table for: {selected_label}")
+    if extracted_df.empty:
+        st.warning("No extracted data for this document.")
+    else:
+        st.dataframe(extracted_df)
+
+    # "Link" / download button for the document
+    # (This is the closest thing to a link for local files in Streamlit Cloud)
+    # We look up the file_path from DB:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT file_path FROM documents WHERE id = ?", (selected_doc_id,))
+    file_path = cur.fetchone()[0]
+    conn.close()
+
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            st.download_button(
+                label="Download original document",
+                data=f,
+                file_name=os.path.basename(file_path),
+                mime="application/octet-stream",
+            )
+    else:
+        st.error(f"File not found on disk: {file_path}")
