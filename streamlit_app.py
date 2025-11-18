@@ -374,13 +374,13 @@ ocr_reader = load_ocr()
 # ---------------------------------------------------------
 # 🖼️ Handle image upload + preview
 # ---------------------------------------------------------
-if img_file is not None:
-    st.markdown(f"**Image uploaded:** `{img_file.name}`")
+#if img_file is not None:
+    #st.markdown(f"**Image uploaded:** `{img_file.name}`")
     #st.image(img_file, caption="Uploaded image", use_container_width=True)
 
 
 if img_file is not None:
-    st.markdown(f"**Image uploaded:** `{img_file.name}`")
+    #st.markdown(f"**Image uploaded:** `{img_file.name}`")
     st.image(img_file, caption="Uploaded image", use_container_width=True)
 
     # Convert to NumPy image
