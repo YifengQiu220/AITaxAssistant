@@ -8,3 +8,4 @@ unstructured
 sentence-transformers 
 easyocr
 torch
+openai
