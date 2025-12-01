@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from tax_brain import TaxOrchestrator, UserProfile
+from mainlogic.tax_brain import TaxOrchestrator, UserProfile
 import tempfile
 
 # OCR 相关
