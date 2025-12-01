@@ -1,7 +1,22 @@
+# 修复 sqlite3 问题（必须在最开头）
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except (ImportError, KeyError):
+    pass
+
 import streamlit as st
 import os
-from mainlogic.tax_brain import TaxOrchestrator, UserProfile
+import sys
 import tempfile
+
+# --- 核心修正: 确保能找到同级目录下的 tax_brain ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
+
+# 现在可以直接 import 了
+from tax_brain import TaxOrchestrator, UserProfile
 
 # OCR 相关
 try:
@@ -40,6 +55,7 @@ st.set_page_config(
 @st.cache_resource
 def load_ocr():
     if OCR_AVAILABLE:
+        # gpu=False 适合 Cloud 环境
         return easyocr.Reader(["en"], gpu=False)
     return None
 
@@ -57,7 +73,7 @@ def extract_text_from_file(uploaded_file):
             
         elif file_type == "application/pdf":
             if not PDF_AVAILABLE:
-                return "❌ PDF support not installed. Run: pip install pypdf2"
+                return "❌ PDF support not installed. Run: pip install PyPDF2"
             reader = PdfReader(uploaded_file)
             text_chunks = []
             for page in reader.pages[:10]:  # 限制前10页
@@ -166,17 +182,21 @@ def main():
     st.title("🤖 AI Tax Assistant")
     st.caption("Powered by Google Gemini 2.0 Flash + RAG")
     
-    # API Key 输入
+    # --- 智能读取 API Key ---
+            # --- 智能读取 API Key ---
+    # --- 直接从 secrets.toml 读取 API Key ---
     if 'api_key' not in st.session_state:
-        st.session_state.api_key = os.getenv("GOOGLE_API_KEY")
+        try:
+            # 从 secrets.toml 读取
+            st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
+            print("✅ API Key loaded from secrets.toml")
+        except Exception as e:
+            # 如果 secrets.toml 不存在，尝试环境变量
+            st.session_state.api_key = os.getenv("GOOGLE_API_KEY")
+            if not st.session_state.api_key:
+                st.error("❌ API Key not found! Please configure secrets.toml")
+                st.stop()       
     
-    if not st.session_state.api_key:
-        st.warning("⚠️ Please configure your Google API Key")
-        key = st.text_input("Enter Google API Key:", type="password")
-        if key:
-            st.session_state.api_key = key
-            st.rerun()
-        return
     
     # 初始化系统
     if 'orchestrator' not in st.session_state:
@@ -190,6 +210,8 @@ def main():
                 st.success("✅ System ready!")
             except Exception as e:
                 st.error(f"❌ Initialization failed: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
                 return
     
     # 渲染侧边栏
@@ -237,7 +259,10 @@ def main():
         with st.chat_message("assistant"):
             with st.spinner("🤔 Thinking... (Checking IRS documents)"):
                 try:
-                    response = st.session_state.orchestrator.run_orchestrator(full_prompt)
+                    response = st.session_state.orchestrator.run_orchestrator(
+                    full_prompt, 
+                    st.session_state.user_profile
+                    )
                     answer = response["output"]
                     st.markdown(answer)
                     
@@ -248,6 +273,8 @@ def main():
                 except Exception as e:
                     answer = f"❌ Sorry, I encountered an error: {str(e)}"
                     st.error(answer)
+                    import traceback
+                    st.code(traceback.format_exc())
         
         st.session_state.messages.append({"role": "assistant", "content": answer})
         st.rerun()
