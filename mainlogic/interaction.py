@@ -182,21 +182,17 @@ def main():
     st.title("🤖 AI Tax Assistant")
     st.caption("Powered by Google Gemini 2.0 Flash + RAG")
     
-    # --- 智能读取 API Key ---
-            # --- 智能读取 API Key ---
-    # --- 直接从 secrets.toml 读取 API Key ---
+    # --- 直接使用 API Key（临时方案）---
     if 'api_key' not in st.session_state:
+        # 硬编码你的 API Key
+        st.session_state.api_key = "AIzaSyD-NRi7pKPt-WalttQ9gPYpExxxxxg"  # ← 替换成你的真实 Key
+        
+        # 或者尝试从 secrets 读取
         try:
-            # 从 secrets.toml 读取
-            st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
-            print("✅ API Key loaded from secrets.toml")
-        except Exception as e:
-            # 如果 secrets.toml 不存在，尝试环境变量
-            st.session_state.api_key = os.getenv("GOOGLE_API_KEY")
-            if not st.session_state.api_key:
-                st.error("❌ API Key not found! Please configure secrets.toml")
-                st.stop()       
-    
+            if st.secrets.get("GOOGLE_API_KEY"):
+                st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
+        except:
+            pass
     
     # 初始化系统
     if 'orchestrator' not in st.session_state:
