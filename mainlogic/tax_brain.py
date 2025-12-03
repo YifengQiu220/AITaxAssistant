@@ -116,11 +116,11 @@ I'll understand either way! 😊"""
             'completion_rate': (len(required_fields) - len(missing)) / len(required_fields) * 100
         }
     
-    # ✅ 新增：智能追问（借鉴队友的对话式风格）
+    # ✅ 修复：智能追问（最多追问一次）
     def get_smart_followup(self, profile: UserProfile) -> str:
         """
         根据已有信息智能追问
-        模仿队友的友好对话风格
+        ✅ 最多追问一次，然后允许用户跳过
         """
         completeness = self.check_completeness(profile)
         
@@ -130,35 +130,41 @@ I'll understand either way! 😊"""
         missing = completeness['missing_fields']
         completion_rate = completeness['completion_rate']
         
-        # 根据完整度调整语气
-        if completion_rate < 30:
-            # 刚开始：友好开放
-            return """Thanks for that info! To help you better, could you share a bit more?
-
-For example:
-- Are you a student or working professional?
-- What's your citizenship status?
-- Approximate income last year?
-
-Feel free to answer naturally! 😊"""
+        # ✅ 修复：只追问一次，然后给用户选择权
+        if completion_rate == 0:
+            # 第一次：显示完整问卷
+            return self.get_questionnaire()
         
-        elif completion_rate < 70:
-            # 中间：具体追问
+        elif completion_rate > 0 and completion_rate < 100:
+            # ✅ 已经提取了一些信息，只追问一次，然后允许跳过
             friendly_questions = {
-                'citizenship_status': "What's your citizenship status (US Citizen / Green Card / International Student)?",
-                'student_status': "Are you currently a student?",
-                'employment_details': "What's your employment situation?",
-                'income': "What was your approximate income last year?",
-                'residency_state': "Which state do you live in?",
+                'citizenship_status': "your citizenship status (US Citizen / Green Card / International Student)",
+                'student_status': "if you're currently a student",
+                'employment_details': "your employment situation (on-campus / off-campus / self-employed)",
+                'income': "your approximate income last year",
+                'residency_state': "which state you live in",
+                'tax_filing_experience': "if you've filed US taxes before",
+                'residency_duration': "how long you've lived in your current state"
             }
             
-            next_question = friendly_questions.get(missing[0], f"Could you provide your {missing[0]}?")
-            return f"Great! Just one more thing - {next_question}"
+            # 列出所有缺失的字段
+            missing_descriptions = [friendly_questions.get(field, field) for field in missing[:3]]  # 最多显示3个
+            
+            if len(missing) == 1:
+                missing_text = missing_descriptions[0]
+            elif len(missing) == 2:
+                missing_text = " and ".join(missing_descriptions)
+            else:
+                missing_text = ", ".join(missing_descriptions[:-1]) + f", and {missing_descriptions[-1]}"
+            
+            return f"""Great! I've got some of your info ({completion_rate:.0f}% complete).
+
+To give you better guidance, I'd like to know {missing_text}.
+
+**If you don't want to answer these questions, just ask your tax question directly and we'll get started!** 🚀"""
         
         else:
-            # 接近完成：最后确认
-            return f"Almost there! Just need to know: {', '.join(missing)}?"
-
+            return "✅ All set! How can I help you with your taxes today?"
 # ==========================================
 # 2. RAG Agent - 知识检索专家（使用 LangChain Chain）
 # ==========================================
