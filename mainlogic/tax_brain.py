@@ -839,3 +839,80 @@ Generate the checklist:"""
             print(f"⚠️ Checklist generation failed: {e}")
         
         return []
+    
+
+# ==========================================
+# 6. Visual Snippets - 表格映射教学（硬编码数据）
+# ==========================================
+VISUAL_SNIPPETS = {
+    "w2_to_1040nr": [
+        """
+📋 W-2 → Form 1040-NR Mapping (Step 1/5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus: Box 1 (Wages, tips, other compensation)
+
+W-2 Box 1: Wages, tips, other compensation
+    ↓
+Form 1040-NR Line 1a
+    "Total amount from Form(s) W-2, box 1"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Example: If Box 1 shows $45,000, enter $45,000 on Line 1a
+        """,
+        
+        """
+📋 W-2 → Form 1040-NR Mapping (Step 2/5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus: Box 2 (Federal income tax withheld)
+
+W-2 Box 2: Federal income tax withheld
+    ↓
+Form 1040-NR Line 25a
+    "Federal income tax withheld from Form(s) W-2"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Example: If Box 2 shows $5,200, enter $5,200 on Line 25a
+        """,
+        
+        """
+📋 W-2 → Form 1040-NR Mapping (Step 3/5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus: Box 3-4 (Social Security wages and tax)
+
+W-2 Box 3: Social Security wages
+W-2 Box 4: Social Security tax withheld
+    ↓
+⚠️ Not entered directly on Form 1040-NR
+    Used to verify Social Security records
+    Check for excess withholding (Form 843)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """,
+        
+        """
+📋 W-2 → Form 1040-NR Mapping (Step 4/5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus: Box 5-6 (Medicare wages and tax)
+
+W-2 Box 5: Medicare wages and tips
+W-2 Box 6: Medicare tax withheld
+    ↓
+⚠️ Not entered directly on Form 1040-NR
+    Used to verify Medicare withholding amounts
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """,
+        
+        """
+📋 W-2 → Form 1040-NR Mapping (Step 5/5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus: Box 12, 14 (Other information)
+
+W-2 Box 12: Codes (D, E, G, etc.)
+    Retirement contributions (401k, etc.)
+    → May affect Form 8880 or other forms
+
+W-2 Box 14: "Other" information
+    State tax, union dues, etc.
+    → Relevant for state returns or recordkeeping
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ You've completed all W-2 → 1040-NR mappings!
+        """
+    ]
+}

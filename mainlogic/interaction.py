@@ -361,6 +361,54 @@ If you only need a simple answer, please ask directly to skip the user profile."
                     if "tools_used" in msg:
                         st.caption(f"**Tools Used:** {', '.join(msg['tools_used'])}")
     
+    # ==========================================
+    # ✅ NEW: Visual Help Section (在聊天输入前)
+    # ==========================================
+    st.divider()
+    
+    with st.expander("📚 Need help mapping W-2 to Form 1040-NR?", expanded=False):
+        st.markdown("""
+**Step-by-step visual guide** showing how each W-2 box maps to Form 1040-NR lines.
+
+Click the button below to reveal the next step!
+        """)
+        
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            if st.button("🧾 Show Next Step", key="visual_help_btn"):
+                if 'visual_step' not in st.session_state:
+                    st.session_state.visual_step = 0
+                
+                from tax_brain import VISUAL_SNIPPETS  # 导入 snippets
+                max_steps = len(VISUAL_SNIPPETS["w2_to_1040nr"])
+                if st.session_state.visual_step < max_steps - 1:
+                    st.session_state.visual_step += 1
+            
+            if 'visual_step' in st.session_state:
+                from tax_brain import VISUAL_SNIPPETS
+                current = st.session_state.visual_step + 1
+                total = len(VISUAL_SNIPPETS["w2_to_1040nr"])
+                st.progress(current / total)
+                st.caption(f"Step {current} of {total}")
+            
+            if st.button("🔄 Reset", key="visual_reset_btn"):
+                st.session_state.visual_step = 0
+                st.rerun()
+        
+        with col2:
+            if 'visual_step' in st.session_state:
+                from tax_brain import VISUAL_SNIPPETS
+                for i in range(st.session_state.visual_step + 1):
+                    snippet = VISUAL_SNIPPETS["w2_to_1040nr"][i]
+                    st.text(snippet)
+                    if i < st.session_state.visual_step:
+                        st.divider()
+            else:
+                st.info("👈 Click 'Show Next Step' to begin!")
+    
+    st.divider()
+
     # ✅ 用户输入
     if prompt := st.chat_input("Ask me anything about your taxes..."):
         
