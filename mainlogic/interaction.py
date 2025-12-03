@@ -362,7 +362,7 @@ If you only need a simple answer, please ask directly to skip the user profile."
                         st.caption(f"**Tools Used:** {', '.join(msg['tools_used'])}")
     
     # ==========================================
-    # ✅ NEW: Visual Help Section (在聊天输入前)
+    # ✅ NEW: Visual Help Section (在聊天
     # ==========================================
     st.divider()
     with st.expander("📚 W-2 & Form Mapping Help", expanded=False):

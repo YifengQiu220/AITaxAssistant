@@ -33,7 +33,7 @@ COLLECTION_NAME = "federal_tax_documents"
 # ==========================================
 class UserProfile(BaseModel):
     """用户的完整税务画像"""
-    # Intake 调查问卷字段
+    # Intake 调查问
     citizenship_status: Optional[str] = Field(default=None, description="US Citizen, Green Card, or Other")
     student_status: Optional[str] = Field(default=None, description="Full-time student, Part-time, or Not a student")
     employment_details: Optional[str] = Field(default=None, description="Employment type and details")
