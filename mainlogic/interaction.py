@@ -115,86 +115,151 @@ def extract_text_from_image(uploaded_image):
 # ==========================================
 def render_sidebar():
     with st.sidebar:
-        st.header("📋 Filing Progress")
+        st.header("📋 User Profile")
         
-        # 进度追踪
+        # ✅ 显示用户画像完整度
         user_profile = st.session_state.get('user_profile', UserProfile())
-        steps = {
-            "Personal Info": user_profile.name is not None,
-            "Income Data": user_profile.income is not None,
-            "Filing Status": user_profile.filing_status is not None,
-            "Residency": user_profile.residency_state is not None,
-        }
         
-        for step, done in steps.items():
-            icon = "✅" if done else "⬜"
-            st.markdown(f"{icon} {step}")
+        # 计算完整度
+        try:
+            completeness = st.session_state.orchestrator.intake_agent.check_completeness(user_profile)
+            completion_rate = completeness['completion_rate']
+            
+            # 进度条
+            st.progress(completion_rate / 100)
+            st.caption(f"Profile Completion: {completion_rate:.0f}%")
+            
+            # 详细字段状态
+            st.divider()
+            
+            profile_fields = {
+                "👤 Name": user_profile.name,
+                "🌍 Citizenship": user_profile.citizenship_status,
+                "🎓 Student Status": user_profile.student_status,
+                "💼 Employment": user_profile.employment_details,
+                "💰 Income": f"${user_profile.income:,}" if user_profile.income else None,
+                "📍 State": user_profile.residency_state,
+                "📝 Filing Experience": user_profile.tax_filing_experience,
+            }
+            
+            for label, value in profile_fields.items():
+                if value:
+                    st.markdown(f"**{label}:** {value}")
+                else:
+                    st.markdown(f"**{label}:** ⬜ Not provided")
+        
+        except Exception as e:
+            st.error(f"Error loading profile: {e}")
         
         st.divider()
         
-        # 文件上传区域
+        # ✅ 文件上传区域
         st.subheader("📎 Upload Documents")
         
         # 文档上传
         uploaded_doc = st.file_uploader(
             "Upload tax document (PDF/DOCX/TXT)",
             type=["pdf", "docx", "txt"],
-            key="doc_uploader"
+            key="doc_uploader",
+            help="Upload W-2, 1099, or other tax documents"
         )
         
         if uploaded_doc:
-            with st.spinner("Extracting text..."):
+            with st.spinner("📄 Extracting text..."):
                 extracted_text = extract_text_from_file(uploaded_doc)
                 st.session_state.uploaded_doc_text = extracted_text
+                st.session_state.uploaded_doc_name = uploaded_doc.name
+            
+            st.success(f"✅ Extracted from: {uploaded_doc.name}")
             
             with st.expander("📄 Preview", expanded=False):
-                st.text(extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text)
+                preview_text = extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text
+                st.text_area("Document content", preview_text, height=200, disabled=True)
+            
+            # ✅ 清除按钮
+            if st.button("🗑️ Clear Document", key="clear_doc"):
+                st.session_state.uploaded_doc_text = None
+                st.session_state.uploaded_doc_name = None
+                st.rerun()
         
-        # 图片上传
+        # 图片上传 (OCR)
         uploaded_img = st.file_uploader(
             "Upload W-2/1099 Image (OCR)",
             type=["png", "jpg", "jpeg"],
-            key="img_uploader"
+            key="img_uploader",
+            help="Upload a photo of your tax form"
         )
         
         if uploaded_img:
-            st.image(uploaded_img, caption="Uploaded", use_container_width=True)
-            with st.spinner("Running OCR..."):
-                ocr_text = extract_text_from_image(uploaded_img)
-                st.session_state.uploaded_img_text = ocr_text
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.image(uploaded_img, caption="Uploaded", use_container_width=True)
+            
+            with col2:
+                with st.spinner("🔍 Running OCR..."):
+                    ocr_text = extract_text_from_image(uploaded_img)
+                    st.session_state.uploaded_img_text = ocr_text
+                    st.session_state.uploaded_img_name = uploaded_img.name
+            
+            st.success(f"✅ OCR completed: {uploaded_img.name}")
             
             with st.expander("🔍 OCR Result", expanded=False):
-                st.text(ocr_text)
+                st.text_area("Extracted text", ocr_text, height=200, disabled=True)
+            
+            # ✅ 清除按钮
+            if st.button("🗑️ Clear Image", key="clear_img"):
+                st.session_state.uploaded_img_text = None
+                st.session_state.uploaded_img_name = None
+                st.rerun()
         
         st.divider()
         
+        # ✅ System Status
+        st.subheader("🔧 System Status")
+        
+        # 显示 Agent 状态
+        agent_status = {
+            "Intake Agent": "✅ Ready",
+            "RAG Agent": "✅ Ready (LangChain Chain)",
+            "Tool Agent": "✅ Ready",
+            "Orchestrator": "✅ Ready (LLM Decision)"
+        }
+        
+        for agent, status in agent_status.items():
+            st.caption(f"{status} - {agent}")
+        
         # Debug 面板
-        with st.expander("🧠 Memory (Debug)", expanded=False):
+        with st.expander("🧠 Debug Info", expanded=False):
+            st.caption("**User Profile (JSON):**")
             if 'user_profile' in st.session_state:
                 st.json(st.session_state.user_profile.dict(exclude_none=True))
             else:
                 st.write("No data extracted yet.")
+            
+            st.caption("**Session State Keys:**")
+            st.write(list(st.session_state.keys()))
 
 # ==========================================
 # 主界面
 # ==========================================
 def main():
     st.title("🤖 AI Tax Assistant")
-    st.caption("Powered by Google Gemini 2.0 Flash + RAG")
+    st.caption("Powered by Google Gemini 2.0 Flash + LangChain + RAG")
     
-    # --- 直接使用 API Key（临时方案）---
+    # ✅ API Key 设置（修复版）
     if 'api_key' not in st.session_state:
-        # 硬编码你的 API Key
-        st.session_state.api_key = "AIzaSyD-NRi7pKPt-WalttQ9gPYpExxxxxg"  # ← 替换成你的真实 Key
-        
-        # 或者尝试从 secrets 读取
+        st.session_state.api_key = "AIzaSyD-NRi7pKPt-WalttQ9gPYpEFdhQv_TGZg"  # ← 替换成你的真实 Key
         try:
+            # 从 secrets.toml 读取
             if st.secrets.get("GOOGLE_API_KEY"):
-                st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
+                 st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
         except:
             pass
-    
-    # 初始化系统
+
+
+
+
+    # ✅ 初始化系统
     if 'orchestrator' not in st.session_state:
         with st.spinner("🔧 Initializing AI Tax Assistant..."):
             try:
@@ -203,77 +268,170 @@ def main():
                 st.session_state.messages = []
                 st.session_state.uploaded_doc_text = None
                 st.session_state.uploaded_img_text = None
-                st.success("✅ System ready!")
+                st.session_state.uploaded_doc_name = None
+                st.session_state.uploaded_img_name = None
+                st.success("✅ System ready! All agents initialized.")
             except Exception as e:
                 st.error(f"❌ Initialization failed: {str(e)}")
                 import traceback
                 st.code(traceback.format_exc())
-                return
+                st.stop()
     
     # 渲染侧边栏
     render_sidebar()
     
-    # 显示历史消息
+    # ✅ 显示活跃的上传文档提示
+    if st.session_state.get('uploaded_doc_text') or st.session_state.get('uploaded_img_text'):
+        cols = st.columns([3, 1])
+        with cols[0]:
+            active_docs = []
+            if st.session_state.get('uploaded_doc_name'):
+                active_docs.append(f"📄 {st.session_state.uploaded_doc_name}")
+            if st.session_state.get('uploaded_img_name'):
+                active_docs.append(f"🖼️ {st.session_state.uploaded_img_name}")
+            
+            st.info(f"📎 Active documents: {', '.join(active_docs)}")
+        
+        with cols[1]:
+            if st.button("🗑️ Clear All"):
+                st.session_state.uploaded_doc_text = None
+                st.session_state.uploaded_img_text = None
+                st.session_state.uploaded_doc_name = None
+                st.session_state.uploaded_img_name = None
+                st.rerun()
+    
+    # ✅ 显示历史消息
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            
+            # 显示 Agent 决策信息（如果有）
+            if msg["role"] == "assistant" and "decision" in msg:
+                with st.expander("🤖 Agent Decision Process", expanded=False):
+                    st.caption(f"**Decision:** {msg['decision']}")
+                    if "tools_used" in msg:
+                        st.caption(f"**Tools Used:** {', '.join(msg['tools_used'])}")
     
-    # 用户输入
+    # ✅ 用户输入
     if prompt := st.chat_input("Ask me anything about your taxes..."):
         
         # 构建完整的上下文（包含上传的文档）
         context_parts = []
+        tools_context = []
         
         if st.session_state.uploaded_doc_text:
-            context_parts.append(f"**Uploaded Document:**\n{st.session_state.uploaded_doc_text[:1000]}")
+            context_parts.append(f"[Document: {st.session_state.uploaded_doc_name}]\n{st.session_state.uploaded_doc_text[:2000]}")
+            tools_context.append(f"📄 {st.session_state.uploaded_doc_name}")
         
         if st.session_state.uploaded_img_text:
-            context_parts.append(f"**OCR from Image:**\n{st.session_state.uploaded_img_text}")
+            context_parts.append(f"[OCR from: {st.session_state.uploaded_img_name}]\n{st.session_state.uploaded_img_text}")
+            tools_context.append(f"🖼️ {st.session_state.uploaded_img_name}")
         
         # 组合用户问题和上下文
         if context_parts:
-            full_prompt = "\n\n".join(context_parts) + f"\n\n**User Question:** {prompt}"
+            full_prompt = "\n\n".join(context_parts) + f"\n\nUser Question: {prompt}"
+            display_prompt = f"{prompt}\n\n📎 *Using: {', '.join(tools_context)}*"
         else:
             full_prompt = prompt
+            display_prompt = prompt
         
         # 显示用户消息
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append({"role": "user", "content": display_prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(display_prompt)
         
-        # 后台提取用户信息（Intake Agent）
-        try:
-            new_data = st.session_state.orchestrator.run_intake(full_prompt)
-            current_data = st.session_state.user_profile.dict()
-            extracted_data = new_data.dict(exclude_none=True)
-            current_data.update(extracted_data)
-            st.session_state.user_profile = UserProfile(**current_data)
-        except Exception as e:
-            print(f"⚠️ Intake extraction failed: {e}")
+        # ✅ 后台提取用户信息（Intake Agent）
+        with st.status("🔍 Analyzing your information...", expanded=False) as status:
+            try:
+                st.write("📋 Running Intake Agent...")
+                new_data = st.session_state.orchestrator.run_intake(full_prompt)
+                current_data = st.session_state.user_profile.dict()
+                extracted_data = new_data.dict(exclude_none=True)
+                
+                # 显示新提取的字段
+                if extracted_data:
+                    st.write(f"✅ Extracted: {', '.join(extracted_data.keys())}")
+                
+                current_data.update(extracted_data)
+                st.session_state.user_profile = UserProfile(**current_data)
+                status.update(label="✅ Information extracted!", state="complete")
+            except Exception as e:
+                st.write(f"⚠️ Intake extraction warning: {e}")
+                status.update(label="⚠️ Partial extraction", state="running")
         
-        # 生成回答（Orchestrator + RAG）
+        # ✅ 生成回答（Orchestrator + Agent Decision）
         with st.chat_message("assistant"):
-            with st.spinner("🤔 Thinking... (Checking IRS documents)"):
+            with st.status("🤖 AI is thinking...", expanded=True) as status:
                 try:
-                    response = st.session_state.orchestrator.run_orchestrator(
-                    full_prompt, 
-                    st.session_state.user_profile
-                    )
+                    st.write("🧠 Orchestrator analyzing query...")
+                    st.write("🔄 Deciding which agents to use...")
+                    
+                    # 捕获 Agent 的决策输出
+                    import io
+                    import contextlib
+                    
+                    # 创建一个字符串缓冲区来捕获 print 输出
+                    f = io.StringIO()
+                    with contextlib.redirect_stdout(f):
+                        response = st.session_state.orchestrator.run_orchestrator(
+                            full_prompt, 
+                            st.session_state.user_profile
+                        )
+                    
+                    # 获取捕获的输出
+                    captured_output = f.getvalue()
+                    
                     answer = response["output"]
+                    
+                    # 解析 Agent 决策
+                    decision_info = {}
+                    if "LLM Decision:" in captured_output:
+                        decision_line = [line for line in captured_output.split('\n') if 'LLM Decision:' in line]
+                        if decision_line:
+                            decision_info['decision'] = decision_line[0].split('LLM Decision:')[1].strip()
+                    
+                    # 更新状态
+                    if 'decision' in decision_info:
+                        st.write(f"✅ Decision: {decision_info['decision']}")
+                        
+                        if decision_info['decision'] == "SEARCH":
+                            st.write("🔍 Using: RAG Agent (searching IRS documents)")
+                        elif decision_info['decision'] == "CALCULATE":
+                            st.write("🧮 Using: Tool Agent (calculating taxes)")
+                        elif decision_info['decision'] == "BOTH":
+                            st.write("🔍 Using: RAG Agent + Tool Agent")
+                        else:
+                            st.write("💬 Using: Direct answer")
+                    
+                    status.update(label="✅ Answer generated!", state="complete")
+                    
+                    # 显示答案
                     st.markdown(answer)
                     
                     # 清除已使用的上传文档（避免重复使用）
-                    st.session_state.uploaded_doc_text = None
-                    st.session_state.uploaded_img_text = None
+                    if context_parts:
+                        st.caption("📎 *Documents processed and cleared from context*")
+                        st.session_state.uploaded_doc_text = None
+                        st.session_state.uploaded_img_text = None
+                        st.session_state.uploaded_doc_name = None
+                        st.session_state.uploaded_img_name = None
                     
                 except Exception as e:
                     answer = f"❌ Sorry, I encountered an error: {str(e)}"
                     st.error(answer)
                     import traceback
                     st.code(traceback.format_exc())
+                    status.update(label="❌ Error occurred", state="error")
+                    decision_info = {"decision": "ERROR"}
         
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+        # 保存消息（包含决策信息）
+        message_data = {"role": "assistant", "content": answer}
+        if decision_info:
+            message_data.update(decision_info)
+        
+        st.session_state.messages.append(message_data)
         st.rerun()
+
 
 if __name__ == "__main__":
     main()
