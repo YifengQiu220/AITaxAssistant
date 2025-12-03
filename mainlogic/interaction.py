@@ -365,49 +365,45 @@ If you only need a simple answer, please ask directly to skip the user profile."
     # ✅ NEW: Visual Help Section (在聊天输入前)
     # ==========================================
     st.divider()
-    
-    with st.expander("📚 Need help mapping W-2 to Form 1040-NR?", expanded=False):
+    with st.expander("📚 W-2 & Form Mapping Help", expanded=False):
         st.markdown("""
-**Step-by-step visual guide** showing how each W-2 box maps to Form 1040-NR lines.
+    **Search IRS documents** for specific form mappings and instructions.
 
-Click the button below to reveal the next step!
+    Examples:
+    - "How does W-2 Box 1 map to Form 1040-NR?"
+    - "Where do I enter scholarship income?"
+    - "What is Form 1098-T used for?"
         """)
-        
-        col1, col2 = st.columns([1, 3])
-        
-        with col1:
-            if st.button("🧾 Show Next Step", key="visual_help_btn"):
-                if 'visual_step' not in st.session_state:
-                    st.session_state.visual_step = 0
-                
-                from tax_brain import VISUAL_SNIPPETS  # 导入 snippets
-                max_steps = len(VISUAL_SNIPPETS["w2_to_1040nr"])
-                if st.session_state.visual_step < max_steps - 1:
-                    st.session_state.visual_step += 1
-            
-            if 'visual_step' in st.session_state:
-                from tax_brain import VISUAL_SNIPPETS
-                current = st.session_state.visual_step + 1
-                total = len(VISUAL_SNIPPETS["w2_to_1040nr"])
-                st.progress(current / total)
-                st.caption(f"Step {current} of {total}")
-            
-            if st.button("🔄 Reset", key="visual_reset_btn"):
-                st.session_state.visual_step = 0
-                st.rerun()
-        
-        with col2:
-            if 'visual_step' in st.session_state:
-                from tax_brain import VISUAL_SNIPPETS
-                for i in range(st.session_state.visual_step + 1):
-                    snippet = VISUAL_SNIPPETS["w2_to_1040nr"][i]
-                    st.text(snippet)
-                    if i < st.session_state.visual_step:
-                        st.divider()
-            else:
-                st.info("👈 Click 'Show Next Step' to begin!")
     
+        col1, col2 = st.columns([2, 1])
+    
+        with col1:
+            visual_query = st.text_input(
+                "Search for form mapping:",
+                placeholder="e.g., W-2 Box 2 to 1040-NR",
+                key="visual_search_input"
+            )
+    
+        with col2:
+            search_btn = st.button("🔍 Search", key="visual_search_btn", use_container_width=True)
+    
+        if search_btn and visual_query:
+            with st.spinner("Searching IRS documents..."):
+                # ✅ 直接用你的 RAG Agent
+                result = st.session_state.orchestrator.rag_agent.search(visual_query, k=3)
+                st.session_state.visual_help_result = result
+    
+    # 显示结果
+        if st.session_state.get('visual_help_result'):
+            st.markdown("### 📄 Results from IRS Documents:")
+            st.markdown(st.session_state.visual_help_result)
+        
+            if st.button("🗑️ Clear Results", key="clear_visual"):
+                st.session_state.visual_help_result = None
+                st.rerun()
+
     st.divider()
+    
 
     # ✅ 用户输入
     if prompt := st.chat_input("Ask me anything about your taxes..."):
