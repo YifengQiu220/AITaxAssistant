@@ -133,7 +133,6 @@ def render_sidebar():
             st.divider()
             
             profile_fields = {
-                "👤 Name": user_profile.name,
                 "🌍 Citizenship": user_profile.citizenship_status,
                 "🎓 Student Status": user_profile.student_status,
                 "💼 Employment": user_profile.employment_details,
@@ -214,6 +213,48 @@ def render_sidebar():
         
         st.divider()
         
+        # ==========================================
+        # ✅ NEW: Checklist Display
+        # ==========================================
+        st.subheader("📋 Tax Filing Checklist")
+        
+        if st.session_state.get('checklist'):
+            # Calculate overall completion
+            all_sections = st.session_state.checklist
+            if all_sections:
+                total_completion = sum(s.get('completion', 0) for s in all_sections) / len(all_sections)
+                st.progress(total_completion / 100)
+                st.caption(f"Overall Progress: {total_completion:.0f}%")
+                st.divider()
+            
+            # Display each section
+            for section in st.session_state.checklist:
+                heading = section.get("heading", "Unnamed Section")
+                status = section.get("status", "pending")
+                completion = section.get("completion", 0)
+                details = section.get("details", [])
+                
+                # Section header with emoji
+                status_emoji = "✅" if status == "done" else "⏳"
+                
+                with st.expander(f"{status_emoji} {heading} ({completion}%)", expanded=(completion < 100 and completion > 0)):
+                    # Progress bar for this section
+                    st.progress(completion / 100)
+                    
+                    # Display details
+                    for detail in details:
+                        item = detail.get("item", "")
+                        d_status = detail.get("status", "pending")
+                        d_emoji = "✅" if d_status == "done" else "⏳"
+                        st.markdown(f"{d_emoji} {item}")
+                    
+                    st.caption(f"*{len([d for d in details if d.get('status') == 'done'])} of {len(details)} completed*")
+        else:
+            st.info("💡 Start chatting to see your personalized tax filing checklist!")
+            st.caption("The checklist will automatically update as you provide information.")
+        
+        st.divider()
+        
         # ✅ System Status
         st.subheader("🔧 System Status")
         
@@ -222,6 +263,7 @@ def render_sidebar():
             "Intake Agent": "✅ Ready",
             "RAG Agent": "✅ Ready (LangChain Chain)",
             "Tool Agent": "✅ Ready",
+            "Checklist Agent": "✅ Ready (Progress Tracking)",
             "Orchestrator": "✅ Ready (LLM Decision)"
         }
         
@@ -236,6 +278,12 @@ def render_sidebar():
             else:
                 st.write("No data extracted yet.")
             
+            st.caption("**Checklist (JSON):**")
+            if 'checklist' in st.session_state and st.session_state.checklist:
+                st.json(st.session_state.checklist)
+            else:
+                st.write("No checklist generated yet.")
+            
             st.caption("**Session State Keys:**")
             st.write(list(st.session_state.keys()))
 
@@ -243,9 +291,12 @@ def render_sidebar():
 # 主界面
 # ==========================================
 def main():
-    st.title("🤖 AI Tax Assistant")
-    st.caption("Powered by Google Gemini 2.0 Flash + LangChain + RAG")
+    st.title("AI Tax Assistant")
+    st.caption("""Powered by Google Gemini 2.5 Pro + LangChain + RAG. Now, I can only assist NY state users.
     
+If you need help with filling out tax form, please enter "hi" to start - there will be a simple questionnaire to help me better assist you. 
+
+If you only need a simple answer, please ask directly to skip the user profile.""")
     # ✅ API Key 设置（修复版）
     if 'api_key' not in st.session_state:
         st.session_state.api_key = "AIzaSyD-NRi7pKPt-WalttQ9gPYpEFdhQv_TGZg"  # ← 替换成你的真实 Key
@@ -256,9 +307,6 @@ def main():
         except:
             pass
 
-
-
-
     # ✅ 初始化系统
     if 'orchestrator' not in st.session_state:
         with st.spinner("🔧 Initializing AI Tax Assistant..."):
@@ -266,6 +314,7 @@ def main():
                 st.session_state.orchestrator = TaxOrchestrator(st.session_state.api_key)
                 st.session_state.user_profile = UserProfile()
                 st.session_state.messages = []
+                st.session_state.checklist = []  # ← NEW: 初始化 checklist
                 st.session_state.uploaded_doc_text = None
                 st.session_state.uploaded_img_text = None
                 st.session_state.uploaded_doc_name = None
@@ -430,6 +479,33 @@ def main():
             message_data.update(decision_info)
         
         st.session_state.messages.append(message_data)
+        
+        # ==========================================
+        # ✅ NEW: Generate Checklist After Each Turn
+        # ==========================================
+        with st.status("📋 Updating checklist...", expanded=False) as checklist_status:
+            try:
+                st.write("🔄 Checklist Agent analyzing conversation...")
+                
+                # Generate checklist
+                checklist = st.session_state.orchestrator.generate_checklist(
+                    conversation_history=st.session_state.messages,
+                    user_profile=st.session_state.user_profile
+                )
+                
+                st.session_state.checklist = checklist
+                
+                if checklist:
+                    completed_sections = len([s for s in checklist if s.get('status') == 'done'])
+                    total_sections = len(checklist)
+                    st.write(f"✅ Checklist updated: {completed_sections}/{total_sections} sections completed")
+                
+                checklist_status.update(label="✅ Checklist updated!", state="complete")
+                
+            except Exception as e:
+                st.write(f"⚠️ Checklist update failed: {e}")
+                checklist_status.update(label="⚠️ Checklist update failed", state="error")
+        
         st.rerun()
 
 

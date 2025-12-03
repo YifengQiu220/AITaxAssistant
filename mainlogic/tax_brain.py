@@ -52,35 +52,46 @@ class UserProfile(BaseModel):
 # ==========================================
 class IntakeAgent:
     """
-    负责收集用户基本信息的调查问卷 Agent
-    ✅ 固定流程，不需要 LangChain Agent
+    混合模式 Intake Agent
+    ✅ 自动提取（你的） + 友好对话（队友的）
     """
     
     QUESTIONNAIRE = [
         "What is your citizenship status? (US Citizen / Green Card Holder / International Student / Other)",
         "Are you a student? (Full-time / Part-time / Not a student)",
-        "What is your employment status? (On-campus job / Off-campus job / Self-employed / Unemployed)",
-        "Have you filed taxes before? (First time / Filed before)",
+        "What is your employment status? (On-campus job / Off-campus job / Self-employed / Multiple jobs)",
+        "Have you filed US taxes before? (Yes / No)",
         "How long have you lived in your current state?",
-        "What was your total income last year?",
+        "What was your total income last year? (Approximate)",
         "Which state do you currently live in?"
     ]
+    
+    # ✅ 借鉴队友的友好 prompt
+    CONVERSATIONAL_PROMPT = """I'm your AI tax assistant! 👋
+
+I notice you need help with your taxes. To give you the best advice, I'd like to learn a bit about your situation.
+
+You can either:
+1. **Answer these quick questions:**
+{questions}
+
+2. **Or just tell me naturally**, like:
+   - "I'm an international student on F-1 visa, working on-campus, earned $15k"
+   - "I'm a working professional in California, made $60k last year"
+
+I'll understand either way! 😊"""
     
     def __init__(self, llm):
         self.llm = llm
         self.extractor = llm.with_structured_output(UserProfile)
     
     def get_questionnaire(self) -> str:
-        """返回完整的问卷"""
-        questions = "\n".join([f"{i+1}. {q}" for i, q in enumerate(self.QUESTIONNAIRE)])
-        return f"""Welcome! To help you with your taxes, I need to ask a few questions:
-
-{questions}
-
-Please answer these questions, and I'll help you get started!"""
+        """返回友好对话式的问卷"""
+        questions = "\n".join([f"   • {q}" for q in self.QUESTIONNAIRE])
+        return self.CONVERSATIONAL_PROMPT.format(questions=questions)
     
     def extract_info(self, user_input: str) -> UserProfile:
-        """从用户回答中提取结构化信息"""
+        """自动提取（保持你的逻辑）"""
         try:
             return self.extractor.invoke(user_input)
         except Exception as e:
@@ -88,7 +99,7 @@ Please answer these questions, and I'll help you get started!"""
             return UserProfile()
     
     def check_completeness(self, profile: UserProfile) -> Dict[str, Any]:
-        """检查问卷是否完成"""
+        """检查完整度（保持你的逻辑）"""
         required_fields = [
             'citizenship_status', 'student_status', 'employment_details',
             'tax_filing_experience', 'income', 'residency_state'
@@ -104,6 +115,49 @@ Please answer these questions, and I'll help you get started!"""
             'missing_fields': missing,
             'completion_rate': (len(required_fields) - len(missing)) / len(required_fields) * 100
         }
+    
+    # ✅ 新增：智能追问（借鉴队友的对话式风格）
+    def get_smart_followup(self, profile: UserProfile) -> str:
+        """
+        根据已有信息智能追问
+        模仿队友的友好对话风格
+        """
+        completeness = self.check_completeness(profile)
+        
+        if completeness['complete']:
+            return "✅ Perfect! I have everything I need. What would you like help with today?"
+        
+        missing = completeness['missing_fields']
+        completion_rate = completeness['completion_rate']
+        
+        # 根据完整度调整语气
+        if completion_rate < 30:
+            # 刚开始：友好开放
+            return """Thanks for that info! To help you better, could you share a bit more?
+
+For example:
+- Are you a student or working professional?
+- What's your citizenship status?
+- Approximate income last year?
+
+Feel free to answer naturally! 😊"""
+        
+        elif completion_rate < 70:
+            # 中间：具体追问
+            friendly_questions = {
+                'citizenship_status': "What's your citizenship status (US Citizen / Green Card / International Student)?",
+                'student_status': "Are you currently a student?",
+                'employment_details': "What's your employment situation?",
+                'income': "What was your approximate income last year?",
+                'residency_state': "Which state do you live in?",
+            }
+            
+            next_question = friendly_questions.get(missing[0], f"Could you provide your {missing[0]}?")
+            return f"Great! Just one more thing - {next_question}"
+        
+        else:
+            # 接近完成：最后确认
+            return f"Almost there! Just need to know: {', '.join(missing)}?"
 
 # ==========================================
 # 2. RAG Agent - 知识检索专家（使用 LangChain Chain）
@@ -379,12 +433,14 @@ class OrchestratorAgent:
 
 User Profile:
 - Citizenship: {user_profile.citizenship_status or 'Unknown'}
+- Student Status: {user_profile.student_status or 'Unknown'}
+- Employment: {user_profile.employment_details or 'Unknown'}
 - Income: ${user_profile.income or 'Unknown'}
 - State: {user_profile.residency_state or 'Unknown'}
 
 User Question: {user_input}
 
-Decide what actions are needed (you can choose multiple):
+Decide what actions are needed:
 1. SEARCH - Search IRS documents for information
 2. CALCULATE - Calculate tax amount
 3. BOTH - Need both search and calculation
@@ -400,14 +456,19 @@ Respond with ONLY ONE WORD: SEARCH, CALCULATE, BOTH, or DIRECT"""
             # 第二步：根据决策执行
             if action == "SEARCH":
                 context = self.rag.search(user_input)
-                synthesis_prompt = f"""Based on this IRS information, answer the user's question.
+                synthesis_prompt = f"""Based on this IRS information, answer the user's question in a friendly, helpful way.
+
+User Profile:
+- Citizenship: {user_profile.citizenship_status or 'Unknown'}
+- Student Status: {user_profile.student_status or 'Unknown'}
+- Income: ${user_profile.income or 'Unknown'}
 
 User Question: {user_input}
 
 IRS Information:
 {context}
 
-Provide a clear, helpful answer."""
+Provide a clear, helpful answer tailored to their situation. Be conversational and friendly! 😊"""
                 response = self.llm.invoke(synthesis_prompt)
                 return response.content
             
@@ -415,7 +476,13 @@ Provide a clear, helpful answer."""
                 if user_profile.income:
                     return self.tool.calculate_tax(user_profile.income)
                 else:
-                    return "I need your income to calculate taxes. What is your annual income?"
+                    return """I'd love to calculate your taxes! 💰
+
+Could you tell me your approximate annual income? For example:
+- "I earned $35,000 last year"
+- "My income was around $50k"
+
+I'll use this to estimate your federal tax."""
             
             elif action == "BOTH":
                 # 先搜索
@@ -427,7 +494,14 @@ Provide a clear, helpful answer."""
                     tax_info = self.tool.calculate_tax(user_profile.income)
                 
                 # 综合
-                synthesis_prompt = f"""Provide a comprehensive answer combining this information.
+                synthesis_prompt = f"""Provide a comprehensive answer combining IRS documentation and tax calculation.
+
+User Profile:
+- Citizenship: {user_profile.citizenship_status or 'Unknown'}
+- Student Status: {user_profile.student_status or 'Unknown'}
+- Employment: {user_profile.employment_details or 'Unknown'}
+- Income: ${user_profile.income or 'Unknown'}
+- State: {user_profile.residency_state or 'Unknown'}
 
 User Question: {user_input}
 
@@ -435,9 +509,13 @@ IRS Documentation:
 {context}
 
 Tax Calculation:
-{tax_info if tax_info else "Income not provided"}
+{tax_info if tax_info else "Income not provided - cannot calculate yet"}
 
-Synthesize a clear, complete answer."""
+Synthesize a clear, complete answer that:
+1. Addresses their specific situation
+2. Explains relevant IRS rules
+3. Provides concrete numbers (if available)
+4. Sounds friendly and helpful! 😊"""
                 response = self.llm.invoke(synthesis_prompt)
                 return response.content
             
@@ -449,21 +527,163 @@ Synthesize a clear, complete answer."""
             return self.rag.answer_with_context(user_input, user_profile)
     
     def route(self, user_input: str, user_profile: UserProfile) -> str:
-        """主路由逻辑"""
+        """
+        主路由逻辑
+        ✅ 集成新的友好对话式 Intake Agent
+        """
         user_lower = user_input.lower().strip()
         
-        # 简单问候 → 规则路由
-        if user_lower in ['hi', 'hello', 'hey', 'start', 'begin']:
+        # ✅ 改进 1: 简单问候 → 使用新的友好问卷
+        if user_lower in ['hi', 'hello', 'hey', 'start', 'begin', 'help']:
             completeness = self.intake.check_completeness(user_profile)
+            
             if not completeness['complete']:
-                return f"📋 {self.intake.get_questionnaire()}"
+                # 返回友好的对话式问卷
+                return self.intake.get_questionnaire()
             else:
-                return "✅ Great! I have all your information. How can I help you with your taxes today?"
+                # 全部信息已收集，使用智能追问
+                return self.intake.get_smart_followup(user_profile)
         
-        # 其他查询 → LLM 决策
+        # ✅ 改进 2: 检查是否需要追问信息
+        completeness = self.intake.check_completeness(user_profile)
+        
+        # 如果信息不完整且用户可能在补充信息
+        if not completeness['complete'] and completeness['completion_rate'] < 70:
+            # 检查用户输入是否像是在回答问卷
+            answering_patterns = [
+                'i am', "i'm", 'my', 'yes', 'no', 'student', 'citizen', 
+                'green card', 'f-1', 'income', 'earned', 'state', 'live in'
+            ]
+            
+            if any(pattern in user_lower for pattern in answering_patterns):
+                # 用户可能在提供信息，先让 Intake Agent 提取
+                # 然后返回智能追问
+                followup = self.intake.get_smart_followup(user_profile)
+                
+                # 如果还需要更多信息，先追问
+                if "almost there" not in followup.lower() and "perfect" not in followup.lower():
+                    return followup
+        
+        # ✅ 改进 3: 其他查询 → LLM 决策（保持原有逻辑）
         print("🤖 Using LLM-enhanced decision making...")
         return self._llm_decide_and_act(user_input, user_profile)
 
+# ==========================================
+# 5. Checklist Agent - 进度追踪专家（普通类）
+# ==========================================
+class ChecklistAgent:
+    """
+    负责生成和维护税务清单
+    ✅ 纯 LLM 调用，不需要 LangChain Agent
+    """
+    
+    def __init__(self, llm):
+        self.llm = llm
+    
+    def generate_checklist(self, conversation_history: List[dict], user_profile: UserProfile) -> List[dict]:
+        """
+        基于对话历史和用户画像生成任务清单
+        Returns: [{"heading": "...", "status": "done/pending", "completion": 0-100, "details": [...]}]
+        """
+        if not conversation_history:
+            return []
+        
+        # 转换对话为文本
+        convo_text = "\n".join([
+            f"{msg.get('role', 'user').upper()}: {msg.get('content', '')}" 
+            for msg in conversation_history
+        ])
+        
+        # System prompt
+        system_prompt = """You are a CHECKLIST AGENT for US tax filing.
+
+Based on the conversation and user profile, generate a hierarchical task checklist.
+
+Return ONLY valid JSON in this EXACT format:
+{
+  "sections": [
+    {
+      "heading": "Collect W-2 forms",
+      "status": "pending",
+      "details": [
+        {"item": "Collect W-2 from each employer for the tax year", "status": "done"},
+        {"item": "Record wages, tips, other compensation (Box 1)", "status": "pending"},
+        {"item": "Record federal income tax withheld (Box 2)", "status": "pending"}
+      ]
+    },
+    {
+      "heading": "Gather 1099 statements",
+      "status": "pending",
+      "details": [
+        {"item": "Collect 1099-INT for interest income", "status": "pending"},
+        {"item": "Collect 1099-DIV for dividend income", "status": "pending"}
+      ]
+    }
+  ]
+}
+
+Rules:
+- Use ACTION headings (e.g., "Collect W-2 forms", "Complete Form 1040-NR", "Gather 1099 statements")
+- Each section should have 3-7 detailed sub-items
+- Mark detail as "done" ONLY if user explicitly mentioned completing it in conversation
+- Section status is "done" only if ALL its details are "done", otherwise "pending"
+- Tailor sections to user profile:
+  * International students: Form 1098-T, scholarship income, on-campus W-2
+  * Working professionals: W-2, 1099 income, retirement contributions
+  * Self-employed: 1099-NEC/1099-K, business expenses
+- Provide 4-8 sections total
+- Return ONLY the JSON, no extra text"""
+
+        # User prompt
+        user_context = f"""User Profile:
+{json.dumps(user_profile.dict(exclude_none=True), indent=2)}
+
+Conversation History:
+{convo_text}
+
+Generate the tax filing checklist as JSON:"""
+
+        try:
+            response = self.llm.invoke(f"{system_prompt}\n\n{user_context}")
+            
+            # Parse JSON from response
+            import re
+            content = response.content if hasattr(response, 'content') else str(response)
+            
+            # Try to extract JSON block
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                sections = data.get("sections", [])
+                
+                # Calculate completion percentage for each section
+                for section in sections:
+                    details = section.get("details", [])
+                    if details:
+                        done_count = sum(1 for d in details if d.get("status") == "done")
+                        section["completion"] = int((done_count / len(details)) * 100)
+                    else:
+                        section["completion"] = 0
+                    
+                    # Auto-set section status
+                    if section["completion"] == 100:
+                        section["status"] = "done"
+                    else:
+                        section["status"] = "pending"
+                
+                return sections
+                
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Checklist JSON parsing failed: {e}")
+        except Exception as e:
+            print(f"⚠️ Checklist generation failed: {e}")
+        
+        return []
+
+
+# ==========================================
+# 6. 主协调器（对外接口）- 更新版
+# ==========================================
 class TaxOrchestrator:
     """主入口，管理所有 Agents"""
     
@@ -473,8 +693,8 @@ class TaxOrchestrator:
             raise ValueError("GOOGLE_API_KEY is required. Please set it in your environment.")
         
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-exp",
-            google_api_key=api_key,  # 明确传递 API key
+            model="gemini-2.5-pro",
+            google_api_key=api_key,
             temperature=0
         )
         
@@ -489,6 +709,9 @@ class TaxOrchestrator:
         
         self.tool_agent = ToolAgent()
         print("✅ Tool Agent ready (普通类 - 固定计算)")
+        
+        self.checklist_agent = ChecklistAgent(self.llm)
+        print("✅ Checklist Agent ready (普通类 - 进度追踪)")
         
         self.orchestrator = OrchestratorAgent(
             self.llm,
@@ -510,3 +733,109 @@ class TaxOrchestrator:
     def run_intake(self, user_input: str) -> UserProfile:
         """专门提取用户信息"""
         return self.intake_agent.extract_info(user_input)
+    
+    def generate_checklist(self, conversation_history: List[dict], user_profile: UserProfile = None) -> List[dict]:
+        """
+        生成税务清单（供 Streamlit 调用）
+        
+        Args:
+            conversation_history: 对话历史 [{"role": "user", "content": "..."}]
+            user_profile: 用户画像
+        
+        Returns:
+            清单列表 [{"heading": "...", "status": "...", "completion": ..., "details": [...]}]
+        """
+        if user_profile is None:
+            user_profile = UserProfile()
+        
+        return self.checklist_agent.generate_checklist(conversation_history, user_profile)
+
+# ==========================================
+# 5. Checklist Agent - 进度追踪专家（普通类）
+# ==========================================
+class ChecklistAgent:
+    """
+    负责生成和维护税务清单
+    ✅ 纯 LLM 调用，不需要 LangChain Agent
+    """
+    
+    def __init__(self, llm):
+        self.llm = llm
+    
+    def generate_checklist(self, conversation_history: List[dict], user_profile: UserProfile) -> List[dict]:
+        """
+        基于对话历史和用户画像生成任务清单
+        """
+        if not conversation_history:
+            return []
+        
+        # 转换对话为文本
+        convo_text = "\n".join([
+            f"{msg['role'].upper()}: {msg['content']}" 
+            for msg in conversation_history
+        ])
+        
+        # Prompt
+        system_prompt = """You are a CHECKLIST AGENT for US tax filing.
+
+Based on the conversation and user profile, generate a hierarchical task checklist.
+
+Return ONLY valid JSON in this format:
+{
+  "sections": [
+    {
+      "heading": "Collect W-2 forms",
+      "status": "pending",
+      "completion": 50,
+      "details": [
+        {"item": "Collect W-2 from employer", "status": "done"},
+        {"item": "Record Box 1 wages", "status": "pending"}
+      ]
+    }
+  ]
+}
+
+Rules:
+- Heading: Action-oriented (e.g., "Collect W-2 forms", "Complete Form 1040-NR")
+- Status: "done" if ALL details are done, else "pending"
+- Completion: 0-100 percentage
+- Mark detail as "done" ONLY if user explicitly mentioned it
+- Tailor to user profile (student → Form 1098-T, working → W-2, etc.)
+- 4-8 sections total
+"""
+
+        user_prompt = f"""User Profile:
+{json.dumps(user_profile.dict(exclude_none=True), indent=2)}
+
+Conversation:
+{convo_text}
+
+Generate the checklist:"""
+
+        try:
+            response = self.llm.invoke(f"{system_prompt}\n\n{user_prompt}")
+            
+            # Parse JSON
+            import re
+            json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                sections = data.get("sections", [])
+                
+                # Normalize
+                for section in sections:
+                    if "completion" not in section:
+                        # Calculate from details
+                        details = section.get("details", [])
+                        if details:
+                            done_count = sum(1 for d in details if d.get("status") == "done")
+                            section["completion"] = int((done_count / len(details)) * 100)
+                        else:
+                            section["completion"] = 0
+                
+                return sections
+                
+        except Exception as e:
+            print(f"⚠️ Checklist generation failed: {e}")
+        
+        return []
