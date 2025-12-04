@@ -321,7 +321,26 @@ I'll understand either way! 😊"""
     
     def __init__(self, llm):
         self.llm = llm
-        self.extractor = llm.with_structured_output(UserProfile)
+        
+        # ✅ FIX: 定义防幻觉的提取指令
+        extraction_system_prompt = """You are an expert data extraction agent.
+        Your task is to extract user profile information into a structured JSON format.
+        
+        CRITICAL RULES:
+        1. ONLY extract information that is EXPLICITLY stated in the user's input.
+        2. If a field is not mentioned, leave it as null (None).
+        3. DO NOT infer or guess information.
+        4. DO NOT use example data (like "California" or "$60k") unless the user explicitly claims it.
+        5. If the user only says greetings like "hi", "hello", or asks a question without providing personal info, return an EMPTY profile.
+        """
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", extraction_system_prompt),
+            ("human", "{input}"),
+        ])
+        
+        # ✅ 将 Prompt 和 LLM 绑在一起
+        self.extractor = prompt | llm.with_structured_output(UserProfile)
     
     def get_questionnaire(self) -> str:
         questions = "\n".join([f"   • {q}" for q in self.QUESTIONNAIRE])
