@@ -1,4 +1,4 @@
-# Fix sqlite3 issue (must be at the very top)
+# Fix sqlite3 issue (must be at the very top)fdg
 try:
     __import__('pysqlite3')
     import sys
