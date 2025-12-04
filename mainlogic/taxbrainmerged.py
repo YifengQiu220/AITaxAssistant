@@ -290,7 +290,7 @@ class UserProfile(BaseModel):
     w2_forms_count: Optional[int] = Field(default=None)
 
 # ==========================================
-# 1. Intake Agent
+# 1. Intake Agent (Fixed)
 # ==========================================
 class IntakeAgent:
     """Hybrid Intake Agent with auto-extraction and friendly dialogue"""
@@ -314,14 +314,33 @@ You can either:
 {questions}
 
 2. **Or just tell me naturally**, like:
-   - "I'm an international student on F-1 visa, working on-campus, earned $15k"
-   - "I'm a working professional in California, made $60k last year"
+   - "I'm an international student on F-1 visa, working on-campus..."
+   - "I'm a working professional in New York..."
 
-I'll understand either way! 😊"""
+(These are just examples! Please tell me YOUR situation. 😊)"""
     
     def __init__(self, llm):
         self.llm = llm
-        self.extractor = llm.with_structured_output(UserProfile)
+        
+        # ✅ FIX: 定义防幻觉的提取指令
+        extraction_system_prompt = """You are an expert data extraction agent.
+        Your task is to extract user profile information into a structured JSON format.
+        
+        CRITICAL RULES:
+        1. ONLY extract information that is EXPLICITLY stated in the user's input.
+        2. If a field is not mentioned, leave it as null (None).
+        3. DO NOT infer or guess information.
+        4. DO NOT use example data (like "California" or "$60k") unless the user explicitly claims it.
+        5. If the user only says greetings like "hi", "hello", or asks a question without providing personal info, return an EMPTY profile.
+        """
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", extraction_system_prompt),
+            ("human", "{input}"),
+        ])
+        
+        # ✅ 将 Prompt 和 LLM 绑在一起
+        self.extractor = prompt | llm.with_structured_output(UserProfile)
     
     def get_questionnaire(self) -> str:
         questions = "\n".join([f"   • {q}" for q in self.QUESTIONNAIRE])
@@ -329,14 +348,15 @@ I'll understand either way! 😊"""
     
     def extract_info(self, user_input: str) -> UserProfile:
         try:
-            return self.extractor.invoke(user_input)
+            # invoke 现在接受 dictionary 因为我们加了 prompt template
+            return self.extractor.invoke({"input": user_input})
         except Exception as e:
             print(f"⚠️ Intake extraction failed: {e}")
             return UserProfile()
     
     def check_completeness(self, profile: UserProfile) -> Dict[str, Any]:
-        required = ['citizenship_status', 'student_status', 'employment_details',
-                   'tax_filing_experience', 'income', 'residency_state']
+        required = ['citizenship_status', 'student_status', 'employment_details', 
+                    'tax_filing_experience', 'income', 'residency_state']
         missing = [f for f in required if getattr(profile, f) is None]
         return {
             'complete': len(missing) == 0,
@@ -770,6 +790,12 @@ class ChecklistAgent:
         
         system_prompt = """You are a CHECKLIST AGENT for US tax filing.
 
+CRITICAL RULES:
+1. DO NOT extract user information from the conversation - only create task checklist
+2. IGNORE any example data like "I'm an international student earning $15k" that appears in the assistant's suggestions
+3. Only mark items as "done" based on ACTUAL user responses, NOT example text from the assistant
+4. If the assistant is showing a questionnaire with examples, ALL items should be "pending"
+
 Return ONLY valid JSON in this format:
 {
   "sections": [
@@ -777,7 +803,7 @@ Return ONLY valid JSON in this format:
       "heading": "Collect W-2 forms",
       "status": "pending",
       "details": [
-        {"item": "Collect W-2 from each employer", "status": "done"},
+        {"item": "Collect W-2 from each employer", "status": "pending"},
         {"item": "Record wages (Box 1)", "status": "pending"}
       ]
     }
@@ -787,18 +813,19 @@ Return ONLY valid JSON in this format:
 Rules:
 - ACTION headings (e.g., "Collect W-2 forms", "Complete Form 1040-NR")
 - 3-7 detailed sub-items per section
-- Mark "done" ONLY if user explicitly mentioned completing it
-- Tailor to profile (student → 1098-T, professional → W-2/1099)
+- Mark "done" ONLY if user's OWN messages (not assistant examples) mention completing it
+- Tailor to actual user profile data passed separately, NOT from conversation
 - 4-8 sections total
-- Return ONLY JSON"""
+- Return ONLY JSON, no explanations"""
 
-        user_prompt = f"""User Profile:
+        # ✅ 明确传递真实的 user profile（不是从对话提取）
+        user_prompt = f"""ACTUAL User Profile (use this, not conversation examples):
 {json.dumps(user_profile.dict(exclude_none=True), indent=2)}
 
-Conversation:
+Conversation (IGNORE example data in assistant messages):
 {convo_text}
 
-Generate the checklist:"""
+Generate the checklist based on the ACTUAL user profile above:"""
 
         try:
             response = self.llm.invoke(f"{system_prompt}\n\n{user_prompt}")

@@ -592,6 +592,27 @@ def render_search_section():
 # Main Application
 # ==========================================
 def main():
+    # ✅ DEBUG: 检查初始化时的 user_profile
+    st.write("🔍 INITIALIZATION CHECK:")
+    
+    if 'orchestrator' not in st.session_state:
+        st.write("1. Orchestrator NOT initialized yet")
+    else:
+        st.write("1. Orchestrator ALREADY initialized")
+    
+    if 'user_profile' in st.session_state:
+        profile = st.session_state.user_profile
+        profile_dict = profile.dict(exclude_none=True)
+        st.write(f"2. user_profile data: {profile_dict}")
+        
+        # ✅ 检查每个字段
+        st.write("3. Field details:")
+        st.write(f"   - citizenship_status: {profile.citizenship_status}")
+        st.write(f"   - income: {profile.income}")
+        st.write(f"   - employment_details: {profile.employment_details}")
+    
+    st.divider()
+    # ==========================================
     st.title("🏛️ AI Tax Assistant")
     st.caption("Powered by Google Gemini 2.5 Pro + LangChain + RAG with Visual Form Mapping")
     
@@ -657,17 +678,14 @@ def main():
     # Initialize Session Memory
     # ==========================================
     memory_manager = get_memory_manager()
-    
+
     # Get or create session ID
     if 'session_id' not in st.session_state:
         st.session_state.session_id = get_or_create_session_id()
-    
-    # Load session from memory (only once)
+
+    # ✅ 修复：默认总是创建新 session，不自动加载旧数据
     if 'session_loaded' not in st.session_state:
-        session = load_session_data(memory_manager, st.session_state.session_id)
-        st.session_state.user_session = session
-        
-        # Initialize defaults first
+        # 初始化空状态
         if 'user_profile' not in st.session_state:
             st.session_state.user_profile = UserProfile()
         if 'messages' not in st.session_state:
@@ -675,27 +693,57 @@ def main():
         if 'checklist' not in st.session_state:
             st.session_state.checklist = []
         
-        # Restore from memory
-        restore_session_state(memory_manager, session)
+        # 创建新 session（不加载旧数据）
+        session = UserSession(session_id=st.session_state.session_id)
+        st.session_state.user_session = session
+        
+        # ✅ 注释掉自动恢复，避免加载旧数据
+        # restore_session_state(memory_manager, session)  # ← 这行导致了问题
+        
         st.session_state.session_loaded = True
-    
+
     # Show memory status
     if memory_manager:
-        st.success("✅ Session Memory Connected", icon="💾")
+        st.success("✅ Session Memory Connected (New Session)", icon="🆕")
     else:
         st.warning("⚠️ Session memory unavailable. Progress won't persist.")
-    
+        
     # ==========================================
     # Initialize Orchestrator
     # ==========================================
     if 'orchestrator' not in st.session_state:
         with st.spinner("🔧 Initializing AI Tax Assistant..."):
             try:
+                # ✅ 在这行之后添加 debug
                 st.session_state.orchestrator = TaxOrchestrator(st.session_state.api_key)
+                
+                # ==========================================
+                # ✅ DEBUG: 检查初始化后的状态
+                # ==========================================
+                st.write("🔍 After TaxOrchestrator init:")
+                st.write(f"   user_profile exists? {'user_profile' in st.session_state}")
                 
                 # Initialize other session state if not already set
                 if 'user_profile' not in st.session_state:
                     st.session_state.user_profile = UserProfile()
+                    st.write("   ✅ Created NEW empty UserProfile")
+                else:
+                    st.write(f"   ⚠️ UserProfile ALREADY exists!")
+                    st.write(f"   Data: {st.session_state.user_profile.dict(exclude_none=True)}")
+                
+                # ✅ 强制重置为空
+                st.write("   🔄 Force resetting to empty UserProfile...")
+                st.session_state.user_profile = UserProfile()
+                
+                # ✅ 验证
+                test_profile = st.session_state.user_profile.dict(exclude_none=True)
+                st.write(f"   Final check: {test_profile}")
+                if test_profile:
+                    st.error(f"❌ BUG! Profile still has data: {test_profile}")
+                else:
+                    st.success("✅ Profile is empty: {}")
+                # ==========================================
+                
                 if 'messages' not in st.session_state:
                     st.session_state.messages = []
                 if 'checklist' not in st.session_state:
@@ -892,15 +940,26 @@ def main():
         # ==========================================
         # Step 6: 
         # ==========================================
+        # ✅ 添加 debug 在 Checklist 更新前后
         with st.status("📋 Updating checklist...", expanded=False) as checklist_status:
             try:
+                # ✅ DEBUG: 检查更新前
+                st.write(f"🔍 BEFORE checklist update:")
+                st.write(f"   Profile data: {st.session_state.user_profile.dict(exclude_none=True)}")
+                
                 checklist = st.session_state.orchestrator.generate_checklist(
                     st.session_state.messages,
                     st.session_state.user_profile
                 )
                 st.session_state.checklist = checklist
+                
+                # ✅ DEBUG: 检查更新后
+                st.write(f"🔍 AFTER checklist update:")
+                st.write(f"   Profile data: {st.session_state.user_profile.dict(exclude_none=True)}")
+                
                 checklist_status.update(label="✅ Checklist updated!", state="complete")
             except Exception as e:
+                st.write(f"⚠️ Error: {e}")
                 checklist_status.update(label="⚠️ Failed", state="error")
         
         # ==========================================
