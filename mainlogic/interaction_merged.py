@@ -632,16 +632,16 @@ def main():
     # Initialize API Key
     # ==========================================
     if 'api_key' not in st.session_state:
-        # ✅ 优先从 secrets.toml 读取
+       
         try:
             st.session_state.api_key = st.secrets["GOOGLE_API_KEY"]
         except (KeyError, FileNotFoundError):
-            # Fallback: 从环境变量读取
+            
             api_key_from_env = os.getenv("GOOGLE_API_KEY")
             if api_key_from_env:
                 st.session_state.api_key = api_key_from_env
             else:
-                # ❌ 如果两个都没有，显示错误并停止
+                
                 st.error("❌ GOOGLE_API_KEY not found in secrets.toml or environment variables!")
                 st.info("""
     **How to fix:**
@@ -739,13 +739,13 @@ def main():
     if prompt := st.chat_input("Ask me anything about your taxes..."):
         
         # ==========================================
-        # Step 1: 检测和遮蔽用户输入中的 PII
+        # 
         # ==========================================
         detected_pii = PIIHandler.detect_pii(prompt)
         masked_prompt, pii_counts = PIIHandler.mask_pii(prompt)
         
         # ==========================================
-        # Step 2: 构建完整上下文（包含上传的文档）
+        # Step 2: 
         # ==========================================
         context_parts = []
         tools_context = []
@@ -755,22 +755,22 @@ def main():
             doc_text = st.session_state.uploaded_doc_text
             doc_name = st.session_state.get('uploaded_doc_name', 'document')
             
-            # ✅ 确保是字符串（如果是 tuple 就提取第一个元素）
+            # 
             if isinstance(doc_text, tuple):
                 doc_text = doc_text[0]
             
-            # 添加到上下文
+            # 
             context_parts.append(f"[Uploaded Document: {doc_name}]\n{doc_text[:2000]}")
             tools_context.append(f"📄 {doc_name}")
             
             print(f"✅ DEBUG: Added document to context (length: {len(doc_text)})")
         
-        # 处理 OCR 图片
+        # 
         if st.session_state.get('uploaded_img_text'):
             img_text = st.session_state.uploaded_img_text
             img_name = st.session_state.get('uploaded_img_name', 'image')
             
-            # ✅ 确保是字符串
+            # 
             if isinstance(img_text, tuple):
                 img_text = img_text[0]
             
@@ -779,7 +779,7 @@ def main():
             
             print(f"✅ DEBUG: Added OCR to context (length: {len(img_text)})")
         
-        # ✅ 组合：文档内容 + 用户问题
+        # 
         if context_parts:
             full_prompt = "\n\n".join(context_parts) + f"\n\nUser Question: {masked_prompt}"
             display_prompt = f"{prompt}\n\n📎 *Using: {', '.join(tools_context)}*"
@@ -793,14 +793,14 @@ def main():
             print("⚠️ DEBUG: No documents in context!")
         
         # ==========================================
-        # Step 3: 显示用户消息
+        # Step 3
         # ==========================================
         st.session_state.messages.append({"role": "user", "content": display_prompt})
         
         with st.chat_message("user"):
             st.markdown(display_prompt)
             
-            # 显示 PII 警告
+            # 
             if pii_counts:
                 st.markdown(f"""
                 <div class="pii-warning">
@@ -809,7 +809,7 @@ def main():
                 """, unsafe_allow_html=True)
         
         # ==========================================
-        # Step 4: 提取用户信息（Intake Agent）
+        # Step 4
         # ==========================================
         with st.status("🔍 Analyzing information...", expanded=False) as status:
             try:
@@ -829,33 +829,33 @@ def main():
                 status.update(label="⚠️ Partial extraction", state="running")
         
         # ==========================================
-        # Step 5: 生成回答（传入完整 prompt！）
+        # Step 5
         # ==========================================
         with st.chat_message("assistant"):
             with st.status("🤖 AI is thinking...", expanded=True) as status:
                 try:
                     st.write("🧠 Orchestrator analyzing query...")
                     
-                    # ✅ 显示 debug 信息
+                    # 
                     if context_parts:
                         st.write(f"📎 Including {len(context_parts)} document(s) in context")
                         st.caption(f"Total context length: {len(full_prompt)} chars")
                     
-                    # ✅ 捕获决策输出
+                    # 
                     import io
                     import contextlib
                     
                     f = io.StringIO()
                     with contextlib.redirect_stdout(f):
                         response = st.session_state.orchestrator.run_orchestrator(
-                            full_prompt,  # ← 确保这里是 full_prompt，不是 masked_prompt 或 prompt
+                            full_prompt,  
                             st.session_state.user_profile
                         )
                     
                     captured_output = f.getvalue()
                     answer = response["output"]
                     
-                    # 解析决策
+                    
                     decision_info = {}
                     if "LLM Decision:" in captured_output:
                         decision_line = [line for line in captured_output.split('\n') if 'LLM Decision:' in line]
@@ -865,13 +865,13 @@ def main():
                     
                     status.update(label="✅ Answer generated!", state="complete")
                     
-                    # 显示答案
+                    
                     st.markdown(answer)
                     
-                    # 添加免责声明
+                    
                     st.caption("*⚠️ Remember: This is educational guidance only, not professional tax advice.*")
                     
-                    # ✅ 清除已使用的文档
+                    
                     if context_parts:
                         st.caption("📎 *Documents processed and cleared from context*")
                         st.session_state.uploaded_doc_text = None
@@ -886,11 +886,11 @@ def main():
                     st.code(traceback.format_exc())
                     status.update(label="❌ Error", state="error")
         
-        # 保存消息
+        # 
         st.session_state.messages.append({"role": "assistant", "content": answer})
         
         # ==========================================
-        # Step 6: 更新 Checklist
+        # Step 6: 
         # ==========================================
         with st.status("📋 Updating checklist...", expanded=False) as checklist_status:
             try:
@@ -904,7 +904,7 @@ def main():
                 checklist_status.update(label="⚠️ Failed", state="error")
         
         # ==========================================
-        # Step 7: 保存到持久化存储
+        # Step 7:
         # ==========================================
         if memory_manager and 'user_session' in st.session_state:
             save_session_state(
@@ -918,7 +918,7 @@ def main():
         st.rerun()
 
     # ==========================================
-    # Visual Help (在聊天输入前)
+    # Visual Help 
     # ==========================================
     render_visual_help()
 
