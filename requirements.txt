@@ -10,3 +10,23 @@ pysqlite3-binary
 python-docx
 PyPDF2
 
+streamlit
+langchain
+langchain-community
+langchain-google-genai 
+chromadb          
+python-docx     
+unstructured      
+sentence-transformers 
+easyocr
+torch
+openai
+pdfplumber
+pydantic
+
+langchain-core
+langchain-huggingface
+
+pysqlite3-binary
+
+PyPDF2
