@@ -172,17 +172,24 @@ class SessionMemoryManager:
         """
         
         metadata = session.to_dict()
+        
         # Convert lists to JSON strings for ChromaDB compatibility
         metadata['forms_completed'] = json.dumps(metadata.get('forms_completed', []))
+        
+        # ✅ FIX 1: 过滤掉 None 值 (修复 InternalError)
+        metadata = {k: v for k, v in metadata.items() if v is not None}
         
         # Check if session exists
         existing = self._get_session_by_id(session.session_id)
         
         if existing:
             # Update existing - delete and re-add
-            self.profiles_db._collection.delete(
-                where={"session_id": session.session_id}
-            )
+            try:
+                self.profiles_db._collection.delete(
+                    where={"session_id": session.session_id}
+                )
+            except:
+                pass
         
         self.profiles_db.add_texts(
             texts=[session_text],
@@ -285,6 +292,9 @@ class SessionMemoryManager:
             "metadata": json.dumps(message.metadata)
         }
         
+        # ✅ FIX 2: 过滤掉 None 值
+        msg_metadata = {k: v for k, v in msg_metadata.items() if v is not None}
+        
         self.conversations_db.add_texts(
             texts=[message_text],
             metadatas=[msg_metadata],
@@ -292,7 +302,7 @@ class SessionMemoryManager:
         )
     
     def get_conversation_history(self, session_id: str, 
-                                  limit: int = 50) -> List[Dict[str, Any]]:
+                                 limit: int = 50) -> List[Dict[str, Any]]:
         """Get conversation history for a session"""
         try:
             results = self.conversations_db._collection.get(
@@ -364,6 +374,9 @@ class SessionMemoryManager:
             "timestamp": datetime.now().isoformat()
         }
         
+        # ✅ FIX 3: 过滤掉 None 值
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        
         # Delete existing checklist for this session
         try:
             self.checklist_db._collection.delete(
@@ -424,6 +437,9 @@ class SessionMemoryManager:
             "timestamp": field_data.timestamp,
             "is_verified": False
         }
+        
+        # ✅ FIX 4: 过滤掉 None 值
+        metadata = {k: v for k, v in metadata.items() if v is not None}
         
         self.form_data_db.add_texts(
             texts=[field_text],
@@ -511,10 +527,22 @@ class SessionMemoryManager:
         """Delete all data for a session"""
         try:
             # Delete from all collections
-            self.profiles_db._collection.delete(ids=[session_id])
-            self.conversations_db._collection.delete(where={"session_id": session_id})
-            self.checklist_db._collection.delete(ids=[f"checklist_{session_id}"])
-            self.form_data_db._collection.delete(where={"session_id": session_id})
+            try:
+                self.profiles_db._collection.delete(ids=[session_id])
+            except: pass
+            
+            try:
+                self.conversations_db._collection.delete(where={"session_id": session_id})
+            except: pass
+            
+            try:
+                self.checklist_db._collection.delete(ids=[f"checklist_{session_id}"])
+            except: pass
+            
+            try:
+                self.form_data_db._collection.delete(where={"session_id": session_id})
+            except: pass
+            
             print(f"✅ Session {session_id} deleted")
         except Exception as e:
             print(f"Error deleting session: {e}")
